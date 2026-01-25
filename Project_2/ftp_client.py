@@ -1,42 +1,58 @@
 import socket
-
-def recv_reply(sock):
-    buffer = b""
-    while b"\r\n" not in buffer:
-        data = sock.recv(4096)
-        if not data:
-            break
-        buffer += data  
-    return buffer.decode(errors="ignore")
+import re
 
 
-# Connect to the FTP server
+#Connect to the FTP server
 def control_connect(HOST, PORT):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((HOST, PORT))
     return sock
 
-def data_connect(HOST, PORT):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.connect((HOST, PORT))
-    return sock
+# def recv_reply(sock):
+    
+#    buffer = ""
+#    while b"\r\n" not in buffer:
+#        data = sock.recv(4096)
+#        if not data:
+#            break
+#        buffer += data  
+#    return buffer.decode(errors="ignore")
+
+def multi_line(sock):
+    complete = False
+
+    response = b""
+    while True:
+        data = sock.recv(4096)
+        if not data:
+            break
+        response += data
+
+        lines = response.split(b'\r\n')
+        for line in lines:
+            match = re.match(rb'^(\d{3})', line)
+
+
+            if match:
+                code = match.group(0)
+                if code + b'-' in line:
+                    pass
+                if code + b' ' in line:
+                    complete = True
+                    break
+            else: 
+                break
+        if complete:
+            break
+
+    return response.decode('utf-8', errors='ignore')
+
 
 
 def send_command(sock, command):
     sock.send(command.encode() + b"\r\n")
-    return recv_reply(sock)
-
-
-
-
-
-    # Read IP Address
-
-    # ip, port = IP_address calculation
-    #sock.send(reply)
-
-    
-    #return soc
+    return multi_line(sock)
+ 
 
 def login(sock, username, password):
     response = send_command(sock, f"USER {username}")
@@ -52,15 +68,23 @@ def pasv_connect(sock):
 
     reply = send_command(sock, "PASV")
     print(reply)
+   # Read IP Address
 
+    # ip, port = IP_address calculation
+    #sock.send(reply)
+
+    
+    #return soc
     return sock
 
 
 def main():
 #    serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    serv = control_connect("ftp.4700.network", 21)
-    login(serv, 'daoud.ja', '97c30eb79ad37d6013afd7acee24226c49d705b1c4c40567449ae6532fd83cc3')
-    pasv_connect(serv)
+    sock = control_connect("ftp.4700.network", 21)
+    login(sock, 'daoud.ja', '97c30eb79ad37d6013afd7acee24226c49d705b1c4c40567449ae6532fd83cc3')
+    pasv_connect(sock)
+    print(multi_line(sock))
+    # pasv_connect(serv)
 
 
 if __name__ == "__main__":
