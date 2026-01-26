@@ -49,6 +49,7 @@ def multi_line(sock):
 
 
 
+
 def send_command(sock, command):
     sock.send(command.encode() + b"\r\n")
     return multi_line(sock)
@@ -63,28 +64,32 @@ def login(sock, username, password):
     return response
 
 
-def pasv_connect(sock):
+def pasv_connect(control_sock):
 # Example PASV reply: 227 Entering Passive Mode (192,168,1,100,128,64)
 
-    reply = send_command(sock, "PASV")
+    reply = send_command(control_sock, "PASV")
     print(reply)
-   # Read IP Address
 
-    # ip, port = IP_address calculation
-    #sock.send(reply)
-
+    match = re.search(r'\(([^)]+)\)', reply)
+    if match:
+        inside = match.group(1).split(',')
+        ip = '.'.join(inside[0:4])
+        port = (int(inside[4])*256) + int(inside[5])
+        data_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        data_sock.connect((ip, port))
+        return data_sock   
+    else:
+        raise Exception("PASV failed: " + reply)
     
-    #return soc
-    return sock
 
 
 def main():
 #    serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock = control_connect("ftp.4700.network", 21)
     login(sock, 'daoud.ja', '97c30eb79ad37d6013afd7acee24226c49d705b1c4c40567449ae6532fd83cc3')
-    pasv_connect(sock)
+
     print(multi_line(sock))
-    # pasv_connect(serv)
+    pasv_connect(sock)
 
 
 if __name__ == "__main__":
