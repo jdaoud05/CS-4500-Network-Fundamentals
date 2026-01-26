@@ -3,8 +3,18 @@ import re
 import sys
 
 
+def parse_ftp():
+    if len(sys.argv) < 2:
+        sys.stderr.write("Usage: ./4700ftp [operation] [param1] [param2]")
+        sys.exit(1)
 
-
+    ftp_url = sys.argv[-1]
+    match = re.search(r'ftp://([^:]+):([^@]+)@([^/]+)', ftp_url)
+    if not match:
+        sys.stderr.write("Error: Incorrect FTP URL Format")
+        sys.exit(1)
+    
+    return str(match.group(1)), str(match.group(2)), str(match.group(3))
 
 #Connect to the FTP server
 def control_connect(HOST, PORT):
@@ -113,16 +123,28 @@ def delete(control_sock, data_sock):
         buffer += data
     data_sock.close()
 
+def create_dir(control_sock):
+    reply = send_command(control_sock, "MKD")
+    print(reply)
+    
+    buffer = b""
+    while True:
+        data = control_sock.recv(4096)
+        if not data:
+            break
+        buffer += data
+    control_sock.close()
+
+    print(buffer.decode())
+
 # def remove_dir(control_sock, data_sock):
-# def create_dir(control_sock, data_sock):
 
 # def type(control_sock, data_sock):
 # def stru(control_sock, data_sock):
 # def quit(control_sock, data_sock):
 
 
-# def copy(control_sock, data_sock):
-# def move(control_sock, data_sock):
+
     
 
 # def remove_file(control_sock, data_sock):
@@ -152,15 +174,25 @@ def delete(control_sock, data_sock):
 
 
 
+# ftp://USER:PASS@url
+# USER = everything after ftp:// to :
+# PASS = everything after : to @
+# url = everything after @
+
 def main():
+
+
+    user, password, hostname = parse_ftp()
+    
 #    serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock = control_connect("ftp.4700.network", 21)
-    login(sock, 'daoud.ja', '97c30eb79ad37d6013afd7acee24226c49d705b1c4c40567449ae6532fd83cc3')
+    sock = control_connect(hostname, 21)
+    login(sock, user, password)
 
     multi_line(sock)
     data_sock = pasv_connect(sock)
     list(sock, data_sock)
     #delete(sock, data_sock)
+    #remove_dir(sock)
     
 
 
