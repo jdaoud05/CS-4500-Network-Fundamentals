@@ -1,5 +1,9 @@
 import socket
 import re
+import sys
+
+
+
 
 
 #Connect to the FTP server
@@ -73,6 +77,7 @@ def pasv_connect(control_sock):
     if match:
         inside = match.group(1).split(',')
         ip = '.'.join(inside[0:4])
+
         port = (int(inside[4])*256) + int(inside[5])
 
         data_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -94,8 +99,57 @@ def list(control_sock, data_sock):
     data_sock.close()
 
     print(buffer.decode())
-   #data_sock = pasv_connect(control_sock)
-    # print(multi_line(sock))
+
+
+def delete(control_sock, data_sock):
+    reply = send_command(control_sock, "DELE")
+    print(reply)
+
+    buffer = b""
+    while True:
+        data = data_sock.recv(4096)
+        if not data:
+            break
+        buffer += data
+    data_sock.close()
+
+# def remove_dir(control_sock, data_sock):
+# def create_dir(control_sock, data_sock):
+
+# def type(control_sock, data_sock):
+# def stru(control_sock, data_sock):
+# def quit(control_sock, data_sock):
+
+
+# def copy(control_sock, data_sock):
+# def move(control_sock, data_sock):
+    
+
+# def remove_file(control_sock, data_sock):
+# def upload(control_sock, data_sock):
+# def download(control_sock, data_sock):
+
+
+
+
+# def input(control_sock, data_sock):
+    # if len(sys.argv) < 3:
+    #     sys.stderr.write("Usage: ./4700ftp [operation] [param1] [param2]")
+    #     sys.exit(1)
+
+#     if sys.argv[1] == 'ls':
+#         list(control_sock, data_sock)
+#     if sys.argv[1] == 'rm':
+#         remove_file(control_sock, data_sock)
+#     if sys.argv[1] == 'rmdir':
+#         remove_dir(control_sock, data_sock)
+#     if sys.argv[1] == 'mkdir':
+#         create_dir(control_sock, data_sock)
+#     if sys.argv[1] == 'cp':
+#         copy(control_sock, data_sock)
+#     if sys.argv[1] == 'mv':
+#         move(control_sock, data_sock)
+
 
 
 def main():
@@ -106,24 +160,14 @@ def main():
     multi_line(sock)
     data_sock = pasv_connect(sock)
     list(sock, data_sock)
+    #delete(sock, data_sock)
+    
 
 
 if __name__ == "__main__":
     main()
-# def handle_ls():
 
-# def handle_mkdir():
-
-# def handle_rm():
-
-# def handle_rmdir():
-
-# def handle_cp():
-
-# def handle_mv():
-
-# if arg1 = ls
-# call handle_ls
-
-# if arg1 = mkdir
-# call handle_mkdir
+# NEXT STEPS:
+    # Write code that successfully implements the required command line syntax and can parse the incoming data
+    # Figure out TYPE, MODE, STRU, and QUIT commands
+    # Implement support for making and deleting remote directories
