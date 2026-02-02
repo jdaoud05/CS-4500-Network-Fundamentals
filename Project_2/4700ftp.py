@@ -3,6 +3,8 @@ import re
 import sys
 
 
+# Parse the input. Extract the parameters
+# Example input: ftp://john:secret123@ftp.example.com/path
 def parse_ftp():
     if len(sys.argv) < 2:
         sys.stderr.write("Usage: ./4700ftp [operation] [param1] [param2]")
@@ -14,9 +16,10 @@ def parse_ftp():
         sys.stderr.write("Error: Incorrect FTP URL Format")
         sys.exit(1)
     
+    # Return the user, password, and hostname
     return str(match.group(1)), str(match.group(2)), str(match.group(3))
 
-#Connect to the FTP server
+# Connect to the FTP server
 def control_connect(HOST, PORT):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((HOST, PORT))
@@ -36,6 +39,9 @@ def multi_line(sock):
     complete = False
 
     response = b""
+
+    # Receive the data until there's a string like %d%d%d xxxx
+    # This indicates its the end of the line
     while True:
         data = sock.recv(4096)
         if not data:
@@ -63,7 +69,7 @@ def multi_line(sock):
 
 
 
-
+# Helper function used to send commands
 def send_command(sock, command):
     sock.send(command.encode() + b"\r\n")
     return multi_line(sock)
@@ -77,7 +83,8 @@ def login(sock, username, password):
         print(f"Server: PASS {password}")
     return response
 
-
+# Send PASV command. Open a separate port for data transfer
+# This is used for actual file/directory data transfer
 def pasv_connect(control_sock):
     reply = send_command(control_sock, "PASV")
     print(reply)
@@ -95,7 +102,40 @@ def pasv_connect(control_sock):
         return data_sock   
     else:
         raise Exception("PASV failed: " + reply)
+
+# Send "Type I" 8-bit binary
+def set_up(control_sock):
+    type_msg = send_command(control_sock, "TYPE I")
+    print(type_msg)
     
+    mode_msg = send_command(control_sock, "MODE S")
+    print(mode_msg)
+
+    stru_msg = send_command(control_sock, "STRU F")
+    print(stru_msg)
+
+    return type_msg, mode_msg, stru_msg
+def quit(control_sock):
+    quit_msg = send_command(control_sock, "QUIT")
+    print(quit_msg)
+
+    return quit_msg
+
+# def mode(control_sock, data_sock):
+#     reply = send_command(control_sock, "MODE S")
+#     print(reply)
+    
+#     data_sock.close()
+#     return reply
+
+# def stru(control_sock, data_sock):
+#     reply = send_command(control_sock, "STRU F")
+#     print(reply)
+    
+#     data_sock.close()
+#     return reply
+
+# Sends LIST, to list all files in the FTP server
 def list(control_sock, data_sock):
     reply = send_command(control_sock, "LIST")
     print(reply)
@@ -109,6 +149,7 @@ def list(control_sock, data_sock):
     data_sock.close()
 
     print(buffer.decode())
+
 
 
 def delete(control_sock, data_sock):
@@ -154,15 +195,16 @@ def create_dir(control_sock):
 
 
 
-# def input(control_sock, data_sock):
-    # if len(sys.argv) < 3:
-    #     sys.stderr.write("Usage: ./4700ftp [operation] [param1] [param2]")
-    #     sys.exit(1)
+def input(control_sock, data_sock):
+     if len(sys.argv) < 3:
+         sys.stderr.write("Usage: ./4700ftp [operation] [param1] [param2]")
+         sys.exit(1)
 
-#     if sys.argv[1] == 'ls':
-#         list(control_sock, data_sock)
+     if sys.argv[1] == 'ls':
+         list(control_sock, data_sock)
 #     if sys.argv[1] == 'rm':
 #         remove_file(control_sock, data_sock)
+
 #     if sys.argv[1] == 'rmdir':
 #         remove_dir(control_sock, data_sock)
 #     if sys.argv[1] == 'mkdir':
@@ -172,6 +214,8 @@ def create_dir(control_sock):
 #     if sys.argv[1] == 'mv':
 #         move(control_sock, data_sock)
 
+# user sends ls to term. client sends set up to server ... then client sends LIST to server...
+#  then client sends QUIT to server
 
 
 # ftp://USER:PASS@url
@@ -187,10 +231,13 @@ def main():
 #    serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock = control_connect(hostname, 21)
     login(sock, user, password)
-
     multi_line(sock)
     data_sock = pasv_connect(sock)
-    list(sock, data_sock)
+
+    set_up(sock)
+    input(sock, data_sock)
+    quit(sock)
+    #input(sock, data_sock)
     #delete(sock, data_sock)
     #remove_dir(sock)
     
