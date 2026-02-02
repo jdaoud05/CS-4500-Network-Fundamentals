@@ -168,26 +168,17 @@ def create_dir(control_sock):
     reply = send_command(control_sock, "MKD")
     print(reply)
     
-    buffer = b""
-    while True:
-        data = control_sock.recv(4096)
-        if not data:
-            break
-        buffer += data
     control_sock.close()
 
-    print(buffer.decode())
+    return reply
+
+def remove_dir(control_sock):
+    reply = send_command(control_sock, "RMD")
+    print(reply)
+
+    return reply
 
 # def remove_dir(control_sock, data_sock):
-
-# def type(control_sock, data_sock):
-# def stru(control_sock, data_sock):
-# def quit(control_sock, data_sock):
-
-
-
-    
-
 # def remove_file(control_sock, data_sock):
 # def upload(control_sock, data_sock):
 # def download(control_sock, data_sock):
@@ -204,11 +195,10 @@ def input(control_sock, data_sock):
          list(control_sock, data_sock)
 #     if sys.argv[1] == 'rm':
 #         remove_file(control_sock, data_sock)
-
-#     if sys.argv[1] == 'rmdir':
-#         remove_dir(control_sock, data_sock)
-#     if sys.argv[1] == 'mkdir':
-#         create_dir(control_sock, data_sock)
+     if sys.argv[1] == 'rmdir':
+         remove_dir(control_sock, data_sock)
+     if sys.argv[1] == 'mkdir':
+         create_dir(control_sock, data_sock)
 #     if sys.argv[1] == 'cp':
 #         copy(control_sock, data_sock)
 #     if sys.argv[1] == 'mv':
@@ -219,6 +209,7 @@ def input(control_sock, data_sock):
 
 
 # ftp://USER:PASS@url
+
 # USER = everything after ftp:// to :
 # PASS = everything after : to @
 # url = everything after @
@@ -247,6 +238,4 @@ if __name__ == "__main__":
     main()
 
 # NEXT STEPS:
-    # Write code that successfully implements the required command line syntax and can parse the incoming data
-    # Figure out TYPE, MODE, STRU, and QUIT commands
     # Implement support for making and deleting remote directories
