@@ -121,19 +121,14 @@ def quit(control_sock):
 
     return quit_msg
 
-# def mode(control_sock, data_sock):
-#     reply = send_command(control_sock, "MODE S")
-#     print(reply)
-    
-#     data_sock.close()
-#     return reply
 
-# def stru(control_sock, data_sock):
-#     reply = send_command(control_sock, "STRU F")
-#     print(reply)
-    
-#     data_sock.close()
-#     return reply
+def extract_path():
+    re_path = re.search("^ftp:\/\/[^\/]+(\/.*)$", sys.argv[-1])
+    path = str(re_path.group(1))
+    return path
+
+
+
 
 # Sends LIST, to list all files in the FTP server
 def list(control_sock, data_sock):
@@ -164,21 +159,28 @@ def delete(control_sock, data_sock):
         buffer += data
     data_sock.close()
 
-def create_dir(control_sock):
-    reply = send_command(control_sock, "MKD")
+def create_dir(control_sock, path):
+
+    path = extract_path()
+
+    reply = send_command(control_sock, f"MKD {path}")
+    print(path)
     print(reply)
     
     control_sock.close()
 
     return reply
 
-def remove_dir(control_sock):
-    reply = send_command(control_sock, "RMD")
+def remove_dir(control_sock, path):
+
+    path = extract_path()
+
+    reply = send_command(control_sock, f"RMD {path}")
     print(reply)
 
     return reply
 
-# def remove_dir(control_sock, data_sock):
+
 # def remove_file(control_sock, data_sock):
 # def upload(control_sock, data_sock):
 # def download(control_sock, data_sock):
@@ -187,18 +189,25 @@ def remove_dir(control_sock):
 
 
 def input(control_sock, data_sock):
-     if len(sys.argv) < 3:
-         sys.stderr.write("Usage: ./4700ftp [operation] [param1] [param2]")
-         sys.exit(1)
 
-     if sys.argv[1] == 'ls':
-         list(control_sock, data_sock)
+    re_path = re.search("^ftp:\/\/[^\/]+(\/.*)$", sys.argv[-1])
+    path = str(re_path.group(1))
+    print(path)
+
+    if len(sys.argv) < 3:
+        sys.stderr.write("Usage: ./4700ftp [operation] [param1] [param2]")
+        sys.exit(1)
+
+
+
+    if sys.argv[1] == 'ls':
+        list(control_sock, data_sock)
 #     if sys.argv[1] == 'rm':
 #         remove_file(control_sock, data_sock)
-     if sys.argv[1] == 'rmdir':
-         remove_dir(control_sock, data_sock)
-     if sys.argv[1] == 'mkdir':
-         create_dir(control_sock, data_sock)
+    if sys.argv[1] == 'rmdir':
+         remove_dir(control_sock, f"{path}")
+    if sys.argv[1] == 'mkdir':
+         create_dir(control_sock, f"{path}")
 #     if sys.argv[1] == 'cp':
 #         copy(control_sock, data_sock)
 #     if sys.argv[1] == 'mv':
@@ -218,6 +227,8 @@ def main():
 
 
     user, password, hostname = parse_ftp()
+    #print(hostname)
+
     
 #    serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock = control_connect(hostname, 21)
@@ -227,7 +238,7 @@ def main():
 
     set_up(sock)
     input(sock, data_sock)
-    quit(sock)
+    #quit(sock)
     #input(sock, data_sock)
     #delete(sock, data_sock)
     #remove_dir(sock)
@@ -239,3 +250,7 @@ if __name__ == "__main__":
 
 # NEXT STEPS:
     # Implement support for making and deleting remote directories
+        # ./4700ftp mkdir ftp://daoud.ja:password@ftp.4700.network/home/james/testdir
+            # client sends: MKD <path-to-directory>\r\n
+        # ./4700ftp rmdir ftp://ftp.4700.network/home/james/testdir
+            # client sends: RMD <path-to-directory>\r\n
