@@ -195,6 +195,7 @@ def upload(control_sock, data_sock, local_path):
     print(reply)
 
     data_sock.sendall(file_data)
+    print(file_data)
     data_sock.close()
 
     reply = multi_line(control_sock)
@@ -204,21 +205,28 @@ def upload(control_sock, data_sock, local_path):
 
 def download(control_sock, data_sock, path):
 
-    
+    # issue. it's not reading the data and writing it
+    # it's onl ycreating a new file
     path = extract_path()
     reply = send_command(control_sock, f"RETR {path}")
 
-    with open(path, 'wb') as f:
+
+    # ISSUE: data from file is not being read
+    # how do we read aata from a file already in an ftp server
+    with open(path, 'wb') as d:
         while True:
             data = data_sock.recv(4096)
+            print(f"THIS DATA: {data}")
             if not data:
                 break
-        f.write(data)
-        data_sock.close()
+            d.write(data)
+
+    data_sock.close()
+        
+    print(f"DATA: {data}")
+       
 
     #control_sock.close()
-    print(reply)
-
 
     reply = multi_line(control_sock)
     print(reply)
