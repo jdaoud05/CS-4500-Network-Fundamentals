@@ -29,7 +29,7 @@ def control_connect(HOST, PORT):
 
 def recv_reply(sock):
     
-   buffer = ""
+   buffer = b""
    while b"\r\n" not in buffer:
        data = sock.recv(4096)
        if not data:
@@ -74,22 +74,24 @@ def multi_line(sock):
 # Helper function used to send commands
 def send_command(sock, command):
     sock.send(command.encode() + b"\r\n")
-    return multi_line(sock)
  
 
- 
 def login(sock, username, password):
-    response = send_command(sock, f"USER {username}")
+    send_command(sock, f"USER {username}")
+    response = recv_reply(sock)
     print(f"Server: USER {username}")
     if password:
-        response = send_command(sock, f"PASS {password}")
+        send_command(sock, f"PASS {password}")
+        response = recv_reply(sock)
         print(f"Server: PASS {password}")
     return response
 
 # Send PASV command. Open a separate port for data transfer
 # This is used for actual file/directory data transfer
 def pasv_connect(control_sock):
-    reply = send_command(control_sock, "PASV")
+    send_command(control_sock, "PASV")
+    reply = multi_line(control_sock)  # Use multi_line
+    # ...
     print(reply)
 
     match = re.search(r'\(([^)]+)\)', reply)
@@ -104,18 +106,20 @@ def pasv_connect(control_sock):
         data_sock.connect((ip, port))
         return data_sock   
     else:
-        raise Exception("PASV failed: " + reply)
+        print("ERRORRRR")
 
 # Send "Type I" 8-bit binary
 def set_up(control_sock):
-    type_msg = send_command(control_sock, "TYPE I")
-    print(type_msg)
+    send_command(control_sock, "TYPE I")
+    type_msg = multi_line(control_sock)  # Use multi_line
     
-    mode_msg = send_command(control_sock, "MODE S")
-    print(mode_msg)
+    send_command(control_sock, "MODE S")
+    mode_msg = multi_line(control_sock)  # Use multi_line
 
-    stru_msg = send_command(control_sock, "STRU F")
-    print(stru_msg)
+    send_command(control_sock, "STRU F")
+    stru_msg = multi_line(control_sock)  # Use multi_line
+
+    return type_msg, mode_msg, stru_msg
 
     return type_msg, mode_msg, stru_msg
 def quit(control_sock):
@@ -126,7 +130,7 @@ def quit(control_sock):
 
 
 def extract_path():
-    re_path = re.search("^ftp:\/\/[^\/]+\/(.*)$", sys.argv[-1])
+    re_path = re.search("^ftp://[^/]+/(.*)$", sys.argv[-1])
     path = str(re_path.group(1))
     return path
 
@@ -134,8 +138,11 @@ def extract_path():
 
 
 # Sends LIST, to list all files in the FTP server
-def list(control_sock, data_sock):
-    reply = send_command(control_sock, "LIST")
+def list(sock):
+    data_sock = pasv_connect(sock)
+
+    send_command(sock, "LIST")
+    reply = recv_reply(sock)
     print(reply)
     
     buffer = b""
@@ -151,7 +158,8 @@ def list(control_sock, data_sock):
 
 
 def delete(control_sock, data_sock):
-    reply = send_command(control_sock, "DELE")
+    send_command(control_sock, "DELE")
+    reply = recv_reply(control_sock)
     print(reply)
 
     buffer = b""
@@ -166,21 +174,33 @@ def create_dir(control_sock, path):
 
     path = extract_path()
 
-    reply = send_command(control_sock, f"MKD {path}")
+    send_command(control_sock, f"MKD {path}")
+    reply = multi_line(control_sock)
     print(path)
     print(reply)
     
-    control_sock.close()
 
     return reply
 
 def remove_dir(control_sock, path):
 
     path = extract_path()
-    print(path)
+    print(f"pp: {path}")
 
-    reply = send_command(control_sock, f"RMD {path}")
+    send_command(control_sock, f"RMD {path}")
+    reply = recv_reply(control_sock)
     print(reply)
+
+
+    return reply
+
+
+def remove_file(control_sock, path):
+
+    path = extract_path()
+
+    send_command(control_sock, f"DELE {path}")
+    reply = recv_reply(control_sock)
 
     return reply
 
@@ -192,11 +212,12 @@ def remove_dir(control_sock, path):
 
 
 
-def input(control_sock, data_sock):
+def input(sock):
+    #data_sock = pasv_connect(sock)
+   
+    
 
-    re_path = re.search("^ftp:\/\/[^\/]+(\/.*)$", sys.argv[-1])
-    path = str(re_path.group(1))
-    print(path)
+   
 
     if len(sys.argv) < 3:
         sys.stderr.write("Usage: ./4700ftp [operation] [param1] [param2]")
@@ -205,13 +226,13 @@ def input(control_sock, data_sock):
 
 
     if sys.argv[1] == 'ls':
-        list(control_sock, data_sock)
-#     if sys.argv[1] == 'rm':
-#         remove_file(control_sock, data_sock)
+        list(sock)
+    if sys.argv[1] == 'rm':
+         remove_file(sock, extract_path())
     if sys.argv[1] == 'rmdir':
-         remove_dir(control_sock, f"{path}")
+         remove_dir(sock, extract_path())
     if sys.argv[1] == 'mkdir':
-         create_dir(control_sock, f"{path}")
+         create_dir(sock, extract_path())
 #     if sys.argv[1] == 'cp':
 #         copy(control_sock, data_sock)
 #     if sys.argv[1] == 'mv':
@@ -236,13 +257,11 @@ def main():
     
 #    serv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock = control_connect(hostname, 21)
-    multi_line(sock)
     login(sock, user, password)
+#   multi_line(sock)
+
     set_up(sock)
-
-    data_sock = pasv_connect(sock)
-
-    input(sock, data_sock)
+    input(sock)
     #quit(sock)
     #input(sock, data_sock)
     #delete(sock, data_sock)
@@ -254,8 +273,5 @@ if __name__ == "__main__":
     main()
 
 # NEXT STEPS:
-    # Implement support for making and deleting remote directories
-        # ./4700ftp mkdir ftp://daoud.ja:password@ftp.4700.network/home/james/testdir
-            # client sends: MKD <path-to-directory>\r\n
-        # ./4700ftp rmdir ftp://ftp.4700.network/home/james/testdir
-            # client sends: RMD <path-to-directory>\r\n
+    # Implement support for uploading and downloading files
+    # Read hello file
