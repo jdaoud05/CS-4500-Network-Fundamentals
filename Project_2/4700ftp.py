@@ -93,7 +93,6 @@ def pasv_connect(control_sock):
     print(reply)
 
     match = re.search(r'\(([^)]+)\)', reply)
-
     if match:
         inside = match.group(1).split(',')
         ip = '.'.join(inside[0:4])
@@ -186,8 +185,43 @@ def remove_dir(control_sock, path):
 
 
 # def remove_file(control_sock, data_sock):
-# def upload(control_sock, data_sock):
-# def download(control_sock, data_sock):
+def upload(control_sock, data_sock, local_path):
+    with open(local_path, 'rb') as f:
+        file_data = f.read()
+    
+
+    reply = send_command(control_sock, f"STOR {local_path}")
+    #control_sock.close()
+    print(reply)
+
+    data_sock.sendall(file_data)
+    data_sock.close()
+
+    reply = multi_line(control_sock)
+    print(reply)
+
+
+
+def download(control_sock, data_sock, path):
+
+    
+    path = extract_path()
+    reply = send_command(control_sock, f"RETR {path}")
+
+    with open(path, 'wb') as f:
+        while True:
+            data = data_sock.recv(4096)
+            if not data:
+                break
+        f.write(data)
+        data_sock.close()
+
+    #control_sock.close()
+    print(reply)
+
+
+    reply = multi_line(control_sock)
+    print(reply)
 
 
 
@@ -197,6 +231,8 @@ def input(control_sock, data_sock):
     re_path = re.search("^ftp:\/\/[^\/]+(\/.*)$", sys.argv[-1])
     path = str(re_path.group(1))
     print(path)
+
+ 
 
     if len(sys.argv) < 3:
         sys.stderr.write("Usage: ./4700ftp [operation] [param1] [param2]")
@@ -212,10 +248,12 @@ def input(control_sock, data_sock):
          remove_dir(control_sock, f"{path}")
     if sys.argv[1] == 'mkdir':
          create_dir(control_sock, f"{path}")
-#     if sys.argv[1] == 'cp':
-#         copy(control_sock, data_sock)
-#     if sys.argv[1] == 'mv':
-#         move(control_sock, data_sock)
+    if sys.argv[1] == 'cp':
+         local_path = sys.argv[2] 
+         print(local_path)
+         upload(control_sock, data_sock, f"{local_path}")
+    if sys.argv[1] == 'mv':
+         download(control_sock, data_sock, f"{path}")
 
 # user sends ls to term. client sends set up to server ... then client sends LIST to server...
 #  then client sends QUIT to server
