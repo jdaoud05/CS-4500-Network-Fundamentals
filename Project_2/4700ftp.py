@@ -27,47 +27,23 @@ def control_connect(HOST, PORT):
     sock.connect((HOST, PORT))
     return sock
 
-def recv_reply(sock):
-    
-   buffer = ""
-   while b"\r\n" not in buffer:
-       data = sock.recv(4096)
-       if not data:
-           break
-       buffer += data  
-   return buffer.decode(errors="ignore")
-
 def multi_line(sock):
-    complete = False
-
     response = b""
+    code = None
 
-    # Receive the data until there's a string like %d%d%d xxxx
-    # This indicates its the end of the line
     while True:
         data = sock.recv(4096)
         if not data:
             break
-        response += data
 
+        response += data
         lines = response.split(b'\r\n')
         for line in lines:
-            match = re.match(rb'^(\d{3})', line)
-
-
+                #  "CODE "
+            match = re.match(rb'^(\d{3}) ', line) #\d{3} = 3 digits; space = final line marker; b'' bytes
             if match:
-                code = match.group(0)
-                if code + b'-' in line:
-                    pass
-                if code + b' ' in line:
-                    complete = True
-                    break
-            else: 
-                break
-        if complete:
-            break
-
-    return response.decode('utf-8', errors='ignore')
+                return response.decode('utf-8', errors='ignore')
+    return response.decode('utf-8', errors='ignore')  # <-- Add at end
 
 
 
@@ -117,11 +93,11 @@ def set_up(control_sock):
     print(stru_msg)
 
     return type_msg, mode_msg, stru_msg
-def quit(control_sock):
-    quit_msg = send_command(control_sock, "QUIT")
-    print(quit_msg)
+# def quit(control_sock):
+#     quit_msg = send_command(control_sock, "QUIT")
+#     print(quit_msg)
 
-    return quit_msg
+#     return quit_msg
 
 
 def extract_path():
@@ -133,7 +109,7 @@ def extract_path():
 
 
 # Sends LIST, to list all files in the FTP server
-def list(control_sock, data_sock):
+def listf(control_sock, data_sock):
     reply = send_command(control_sock, "LIST")
     print(reply)
     
@@ -151,11 +127,8 @@ def list(control_sock, data_sock):
 
 def delete(control_sock, path):
     path = extract_path()
-
     reply = send_command(control_sock, f"DELE {path}")
-    
 
-    control_sock.close()
     return reply
 
 def create_dir(control_sock, path):
@@ -164,8 +137,6 @@ def create_dir(control_sock, path):
 
     reply = send_command(control_sock, f"MKD {path}")
 
-    
-    control_sock.close()
 
     return reply
 
@@ -180,7 +151,6 @@ def remove_dir(control_sock, path):
     return reply
 
 
-# def remove_file(control_sock, data_sock):
 def upload(control_sock, data_sock, local_path):
     with open(local_path, 'rb') as f:
         file_data = f.read()
@@ -200,26 +170,19 @@ def upload(control_sock, data_sock, local_path):
 
 
 def download(control_sock, data_sock, path):
-
-    # issue. it's not reading the data and writing it
-    # it's onl ycreating a new file
     path = extract_path()
     reply = send_command(control_sock, f"RETR {path}")
 
 
-    # ISSUE: data from file is not being read
-    # how do we read aata from a file already in an ftp server
     with open(path, 'wb') as d:
         while True:
             data = data_sock.recv(4096)
-            print(f"THIS DATA: {data}")
             if not data:
                 break
             d.write(data)
 
     data_sock.close()
         
-    print(f"DATA: {data}")
        
 
     #control_sock.close()
@@ -230,11 +193,11 @@ def download(control_sock, data_sock, path):
 
 
 
-def input(control_sock, data_sock):
+def read_command(control_sock):
 
     re_path = re.search("^ftp://[^/]+(/.*)$", sys.argv[-1])
-    path = str(re_path.group(1))
-    print(path)
+    if re_path:
+        path = str(re_path.group(1))
 
  
 
@@ -245,19 +208,23 @@ def input(control_sock, data_sock):
 
 
     if sys.argv[1] == 'ls':
-        list(control_sock, data_sock)
+        data_sock = pasv_connect(control_sock)
+        listf(control_sock, data_sock)
+        
     if sys.argv[1] == 'rm':
-         delete(control_sock, data_sock, f"{path}")
+         delete(control_sock, f"{path}")
     if sys.argv[1] == 'rmdir':
          remove_dir(control_sock, f"{path}")
     if sys.argv[1] == 'mkdir':
          create_dir(control_sock, f"{path}")
     if sys.argv[1] == 'cp':
+         data_sock = pasv_connect(control_sock)
          local_path = sys.argv[2] 
-         print(local_path)
          upload(control_sock, data_sock, f"{local_path}")
     if sys.argv[1] == 'mv':
+         data_sock = pasv_connect(control_sock)
          download(control_sock, data_sock, f"{path}")
+         delete(control_sock, f"{path}")
 
 # user sends ls to term. client sends set up to server ... then client sends LIST to server...
 #  then client sends QUIT to server
@@ -281,10 +248,11 @@ def main():
     multi_line(sock)
     login(sock, user, password)
     set_up(sock)
+    read_command(sock)
+    send_command(sock, "QUIT")
+    sock.close()
 
-    data_sock = pasv_connect(sock)
 
-    input(sock, data_sock)
     #quit(sock)
     #input(sock, data_sock)
     #delete(sock, data_sock)
