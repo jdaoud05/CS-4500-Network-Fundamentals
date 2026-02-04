@@ -149,25 +149,21 @@ def list(control_sock, data_sock):
 
 
 
-def delete(control_sock, data_sock):
-    reply = send_command(control_sock, "DELE")
-    print(reply)
+def delete(control_sock, path):
+    path = extract_path()
 
-    buffer = b""
-    while True:
-        data = data_sock.recv(4096)
-        if not data:
-            break
-        buffer += data
-    data_sock.close()
+    reply = send_command(control_sock, f"DELE {path}")
+    
+
+    control_sock.close()
+    return reply
 
 def create_dir(control_sock, path):
 
     path = extract_path()
 
     reply = send_command(control_sock, f"MKD {path}")
-    print(path)
-    print(reply)
+
     
     control_sock.close()
 
@@ -250,8 +246,8 @@ def input(control_sock, data_sock):
 
     if sys.argv[1] == 'ls':
         list(control_sock, data_sock)
-#     if sys.argv[1] == 'rm':
-#         remove_file(control_sock, data_sock)
+    if sys.argv[1] == 'rm':
+         delete(control_sock, data_sock, f"{path}")
     if sys.argv[1] == 'rmdir':
          remove_dir(control_sock, f"{path}")
     if sys.argv[1] == 'mkdir':
