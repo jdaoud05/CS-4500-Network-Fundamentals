@@ -29,7 +29,6 @@ def control_connect(HOST, PORT):
 
 def multi_line(sock):
     response = b""
-    code = None
 
     while True:
         data = sock.recv(4096)
@@ -39,12 +38,11 @@ def multi_line(sock):
         response += data
         lines = response.split(b'\r\n')
         for line in lines:
-                #  "CODE "
-            match = re.match(rb'^(\d{3}) ', line) #\d{3} = 3 digits; space = final line marker; b'' bytes
+             
+            match = re.match(rb'^(\d{3}) ', line) 
             if match:
                 return response.decode('utf-8', errors='ignore')
-    return response.decode('utf-8', errors='ignore')  # <-- Add at end
-
+    return response.decode('utf-8', errors='ignore')  
 
 
 # Helper function used to send commands
