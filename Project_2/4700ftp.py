@@ -125,7 +125,7 @@ def quit(control_sock):
 
 
 def extract_path():
-    re_path = re.search("^ftp:\/\/[^\/]+\/(.*)$", sys.argv[-1])
+    re_path = re.search("^ftp://[^/]+/(.*)$", sys.argv[-1])
     path = str(re_path.group(1))
     return path
 
@@ -232,7 +232,7 @@ def download(control_sock, data_sock, path):
 
 def input(control_sock, data_sock):
 
-    re_path = re.search("^ftp:\/\/[^\/]+(\/.*)$", sys.argv[-1])
+    re_path = re.search("^ftp://[^/]+(/.*)$", sys.argv[-1])
     path = str(re_path.group(1))
     print(path)
 
