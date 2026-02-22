@@ -43,11 +43,35 @@ class Router:
             else:
                 return False
 
-    def return_route(self, msg):
-            parsed = json.loads(msg)
+    def send_update(self, message, srcif):
+          # 1. Save a copy of the announcement
+        parsed = json.loads(message)
+        # 2. Add an entry to your forwarding table
+        # 3. Send copies of the announcement to neighboring routers
+        self.send(srcif, json.dumps({ "type": "update", "src": self.our_addr(srcif), "dst": srcif, "msg": {parsed["network"], parsed["netmask"], parsed["localpref"], parsed["ASPath"], parsed["origin"], parsed["selfOrigin"]}  }))
+
+
+    def send_table(self, message, srcif):
+            parsed = json.loads(message)
             msg_type = parsed["type"]
             print(f"TYPE: {msg_type}")
+
+
+            # TO DO: Send table message
+            self.send(srcif, json.dumps({ "type": "table", "src": self.our_addr(srcif), "dst": srcif, "msg": {}  }))
+            
+            
             return
+    # def return_route(self, message, srcif):
+    #     parsed = json.loads(message)
+    #     msg_type = parsed["type"]
+
+    #     if msg_type == "update":
+    #         self.send_update(srcif)
+    #     if msg_type == "withdraw":
+    #         self.send_withdraw(srcif)
+    #     if msg_type == "dump":
+    #         self.send_table(srcif)
         
     def run(self):
         while True:
@@ -60,15 +84,20 @@ class Router:
                         srcif = sock
                         break
                 msg = k.decode('utf-8')
-                self.return_route(msg)
+                parsed = json.loads(msg)
+                inner_msg = parsed["msg"]
+                network = inner_msg["network"]
+              #  self.return_route(msg, srcif)
                 print(f"MESSAGE: {msg}")
                 print(f"INCOMING: {srcif}")
+                print(f"INNERMSG: {inner_msg}")
+                print(f"NEWORK: {network}")
 
                 print("Received message '%s' from %s" % (msg, srcif))
                 
         return
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     parser = argparse.ArgumentParser(description='route packets')
     parser.add_argument('asn', type=int, help="AS number of this router")
     parser.add_argument('connections', metavar='connections', type=str, nargs='+', help="connections")
