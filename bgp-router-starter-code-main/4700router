@@ -18,6 +18,8 @@ class Router:
             self.sockets[neighbor].bind(('localhost', 0))
             self.ports[neighbor] = int(port)
             self.relations[neighbor] = relation
+            self.routes = []
+            
             # Sends handshake message
             self.send(neighbor, json.dumps({ "type": "handshake", "src": self.our_addr(neighbor), "dst": neighbor, "msg": {}  }))
 
@@ -31,9 +33,9 @@ class Router:
         self.sockets[network].sendto(message.encode('utf-8'), ('localhost', self.ports[network]))
 
     # Send update message to neighbor depending on received route
-    def decide_send(self, route, learned_from):
-        from_rel = self.relations[learned_from]
-        to_rel = self.relations[route]
+    def decide_send(self, neighbor, srcif):
+        from_rel = self.relations[srcif]
+        to_rel = self.relations[neighbor]
 
         if from_rel == 'cust':
             return True
@@ -44,35 +46,72 @@ class Router:
                 return False
 
     def send_update(self, message, srcif):
-          # 1. Save a copy of the announcement
+        # 1. Save a copy of the announcement
         parsed = json.loads(message)
-        # 2. Add an entry to your forwarding table
-        # 3. Send copies of the announcement to neighboring routers
-        self.send(srcif, json.dumps({ "type": "update", "src": self.our_addr(srcif), "dst": srcif, "msg": {parsed["network"], parsed["netmask"], parsed["localpref"], parsed["ASPath"], parsed["origin"], parsed["selfOrigin"]}  }))
 
+
+        inner_msg = parsed["msg"]
+        # 2. Add an entry to your forwarding table
+        self.routes.append( {
+            "network":inner_msg["network"],
+            "netmask":inner_msg["netmask"],
+            "localpref":inner_msg["localpref"],
+            "selfOrigin":inner_msg["selfOrigin"],
+            "ASPath":inner_msg["ASPath"],
+            "origin":inner_msg["origin"],
+            "peer":srcif
+            } )
+
+
+        # 3. Send copies of the announcement to neighboring routers
+
+        # For every node in sockets
+        for neighbor in self.sockets:
+            # If the neighbor does not equal the incoming connection (not sending back to)
+            if neighbor != srcif:
+                # And decide_send is true:
+                if self.decide_send(neighbor, srcif):
+                    # Send the update message to the neighbor
+                    self.send(neighbor, json.dumps({ "type": "update", "src": self.our_addr(neighbor), "dst": neighbor, "msg": {"network": inner_msg["network"] }, "netmask":inner_msg["netmask"], "ASPath": [self.asn] + inner_msg["ASPath"] } ))
+    
+    def send_withdraw(self, message, srcif):
+        parsed = json.loads(message)
+        inner_msg = parsed["msg"]
+
+        for entry in inner_msg:
+            self.routes = [route for route in self.routes
+                            if not (route["network"] == entry["network"]
+                            and route["netmask"] == entry["netmask"]
+                            and route["peer"] == srcif)]
+
+        for neighbor in self.sockets:
+            if neighbor != srcif:
+                if self.decide_send(neighbor, srcif):
+                    self.send(neighbor, json.dumps(inner_msg))
+        return
 
     def send_table(self, message, srcif):
-            parsed = json.loads(message)
-            msg_type = parsed["type"]
-            print(f"TYPE: {msg_type}")
+        parsed = json.loads(message)
 
+        inner_msg = parsed["msg"]
 
-            # TO DO: Send table message
-            self.send(srcif, json.dumps({ "type": "table", "src": self.our_addr(srcif), "dst": srcif, "msg": {}  }))
+        for neighbor in self.sockets:
+            if neighbor != srcif:
+                if self.decide_send(self, neighbor, srcif):
+                    self.send(neighbor, json.dumps({ "type": "table", "src": self.our_addr(neighbor), "dst": neighbor, "msg": {"network": inner_msg["network"], "netmask": inner_msg["netmask"], "peer":inner_msg["peer"], "localpref": inner_msg["localpref"], "selfOrigin": inner_msg["selfOrigin"], "origin": inner_msg["origin"], "selfOrigin": inner_msg["selfOrigin"]}  }))
+                
+        return
+    def return_route(self, message, srcif):
+        parsed = json.loads(message)
+        msg_type = parsed["type"]
+
+        if msg_type == "update":
+            self.send_update(srcif)
+        if msg_type == "withdraw":
+            self.send_withdraw(srcif)
+        if msg_type == "dump":
+            self.send_table(srcif)
             
-            
-            return
-    # def return_route(self, message, srcif):
-    #     parsed = json.loads(message)
-    #     msg_type = parsed["type"]
-
-    #     if msg_type == "update":
-    #         self.send_update(srcif)
-    #     if msg_type == "withdraw":
-    #         self.send_withdraw(srcif)
-    #     if msg_type == "dump":
-    #         self.send_table(srcif)
-        
     def run(self):
         while True:
             socks = select.select(self.sockets.values(), [], [], 0.1)[0]
@@ -83,17 +122,17 @@ class Router:
                     if self.sockets[sock] == conn:
                         srcif = sock
                         break
-                msg = k.decode('utf-8')
-                parsed = json.loads(msg)
+                message = k.decode('utf-8')
+                parsed = json.loads(message)
                 inner_msg = parsed["msg"]
                 network = inner_msg["network"]
-              #  self.return_route(msg, srcif)
-                print(f"MESSAGE: {msg}")
+                #  self.return_route(msg, srcif)
+                print(f"MESSAGE: {message}")
                 print(f"INCOMING: {srcif}")
                 print(f"INNERMSG: {inner_msg}")
-                print(f"NEWORK: {network}")
+                print(f"NETWORK: {network}")
 
-                print("Received message '%s' from %s" % (msg, srcif))
+                print("Received message '%s' from %s" % (message, srcif))
                 
         return
 
