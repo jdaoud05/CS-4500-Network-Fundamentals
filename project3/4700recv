@@ -2,7 +2,8 @@
 import argparse, socket, time, json, select, sys, hashlib
 
 def checksum(data):
-    return hashlib.md5(data.encode()).hexdigest()
+    # compute and return a hex digest that can be used to detect corruption
+    pass
 
 class Receiver:
     def __init__(self):
@@ -27,7 +28,8 @@ class Receiver:
         self.log("Sent ACK seq=%d" % seq)
 
     def validate_packet(self, msg):
-        return checksum(msg["data"]) == msg["checksum"]
+                # check whether the packet's data matches its checksum field. ret True if the packet is intact, False if it has been corrupted.
+        pass
 
     def run(self):
         while True:
@@ -60,7 +62,6 @@ class Receiver:
 
                 self.log("Received packet seq=%d" % seq)
                 self.send_ack(seq)
-                self.validate_packet(msg.get["data"])
 
                 if seq < self.next_seq or seq in self.buffer:
                     self.log("Duplicate seq=%d, ignoring" % seq)
