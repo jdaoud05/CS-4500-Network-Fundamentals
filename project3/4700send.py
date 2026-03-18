@@ -4,8 +4,7 @@ import argparse, socket, time, json, select, sys, hashlib
 DATA_SIZE = 1400
 
 def checksum(data):
-    # comp / return a hex digest that can be used to detect corruption
-    pass
+    return hashlib.md5(data.encode()).hexdigest()
 
 class Sender:
     def __init__(self, host, port):
@@ -46,17 +45,43 @@ class Sender:
         self.log("RTT estimate=%.3f dev=%.3f timeout=%.3f" % (self.rtt_estimate, self.rtt_dev, self.timeout))
 
     def handle_ack(self, ack):
-        # If the ACK carries a checksum, verify it // drop silently if invalid.
+     
+        seq = ack["seq"]
+        if seq in self.window:
+            rtt = time.time() - self.window[seq]["sent_at"]
+            self.window[seq]["acked"] = True
+            if self.window[seq]["retransmits"] == 0:
+                self.update_rtt(rtt)
+            if self.cwnd < self.ssthresh:
+                self.cwnd += 1
+            else:
+                self.cwnd += 1/self.cwnd
+            if seq is None:
+                print("NO SEQ")
+        
         # If the ACK is for an unacked packet in the window // record the RTT (only if this packet was never retransmitted) and mark it as acked.
-        #  ->update the congestion window accordingly.
-        pass
+        #  -> update the congestion window accordingly.
+    def validate_packet(self, ack):
+        print("ONE " + ack.get("checksum"))
+        print("TWO " + checksum(str(ack["seq"])))
+        return ack.get("checksum") == checksum(str(ack["seq"]))
 
     def retransmit_timed_out(self):
-        # find any unacked packets in the window that have been waiting longer than self.timeout. Resend them and update the congestion state to reflect the detected loss.
-        pass
+        for s, v in self.window.items():
+            if v["acked"] == False:
+                if (time.time() - v["sent_at"]) > self.timeout:
+                    v["sent_at"] = time.time()
+                    v["retransmits"] += 1
+                    self.send_packet(v["msg"])
+                    self.ssthresh = max(self.cwnd / 2, 2)
+                    self.cwnd = 1
+    
+
+              
 
     def run(self):
         while True:
+            # Packets that are "in flight" not yet acked but in the window
             in_flight = len([s for s, v in self.window.items() if not v["acked"]])
             can_send = int(self.cwnd) - in_flight
 
@@ -82,12 +107,13 @@ class Sender:
                     if addr != (self.remote_host, self.remote_port):
                         continue
                     ack = json.loads(raw.decode("utf-8"))
+                    print(ack)
                 except Exception as e:
                     self.log("Error parsing ACK: %s" % e)
                     continue
-
-                if ack.get("type") == "ack":
-                    self.handle_ack(ack)
+                if not self.validate_packet(ack):
+                     continue
+                self.handle_ack(ack)
 
             while self.base in self.window and self.window[self.base]["acked"]:
                 del self.window[self.base]

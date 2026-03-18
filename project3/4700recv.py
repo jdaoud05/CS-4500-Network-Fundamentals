@@ -55,12 +55,17 @@ class Receiver:
                     continue
 
                 seq = msg.get("seq")
-
+                
+                if seq is None:
+                    continue
                 # validate the packet before doing anything with it. corrupted?, log it and move on without acking.
 
                 self.log("Received packet seq=%d" % seq)
-                self.send_ack(seq)
-                self.validate_packet(msg.get["data"])
+                
+                if self.validate_packet(msg):
+                    self.send_ack(seq)
+                else:
+                    continue
 
                 if seq < self.next_seq or seq in self.buffer:
                     self.log("Duplicate seq=%d, ignoring" % seq)
