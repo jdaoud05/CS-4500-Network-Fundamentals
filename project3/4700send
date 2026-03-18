@@ -56,10 +56,15 @@ class Sender:
                 self.cwnd += 1
             else:
                 self.cwnd += 1/self.cwnd
+            if seq is None:
+                print("NO SEQ")
+        
         # If the ACK is for an unacked packet in the window // record the RTT (only if this packet was never retransmitted) and mark it as acked.
         #  -> update the congestion window accordingly.
     def validate_packet(self, ack):
-        return ack.get("checksum") == checksum(ack["checksum"])
+        print("ONE " + ack.get("checksum"))
+        print("TWO " + checksum(str(ack["seq"])))
+        return ack.get("checksum") == checksum(str(ack["seq"]))
 
     def retransmit_timed_out(self):
         for s, v in self.window.items():
@@ -102,12 +107,12 @@ class Sender:
                     if addr != (self.remote_host, self.remote_port):
                         continue
                     ack = json.loads(raw.decode("utf-8"))
+                    print(ack)
                 except Exception as e:
                     self.log("Error parsing ACK: %s" % e)
                     continue
-
-                if self.validate_packet(ack):
-                    continue
+                if not self.validate_packet(ack):
+                     continue
                 self.handle_ack(ack)
 
             while self.base in self.window and self.window[self.base]["acked"]:

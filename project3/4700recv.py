@@ -55,7 +55,9 @@ class Receiver:
                     continue
 
                 seq = msg.get("seq")
-
+                
+                if seq is None:
+                    continue
                 # validate the packet before doing anything with it. corrupted?, log it and move on without acking.
 
                 self.log("Received packet seq=%d" % seq)
