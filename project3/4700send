@@ -41,13 +41,13 @@ class Sender:
         beta = 0.25
         self.rtt_dev = (1 - beta) * self.rtt_dev + beta * abs(sample - self.rtt_estimate)
         self.rtt_estimate = (1 - alpha) * self.rtt_estimate + alpha * sample
-        self.timeout = max(0.5, self.rtt_estimate + 4 * self.rtt_dev)
+        self.timeout = max(0.3, self.rtt_estimate + 4 * self.rtt_dev)
         self.log("RTT estimate=%.3f dev=%.3f timeout=%.3f" % (self.rtt_estimate, self.rtt_dev, self.timeout))
 
     def handle_ack(self, ack):
      
         seq = ack["seq"]
-        if seq in self.window:
+        if seq in self.window and not self.window[seq]["acked"]:
             rtt = time.time() - self.window[seq]["sent_at"]
             self.window[seq]["acked"] = True
             if self.window[seq]["retransmits"] == 0:
@@ -56,26 +56,27 @@ class Sender:
                 self.cwnd += 1
             else:
                 self.cwnd += 1/self.cwnd
-            if seq is None:
-                print("NO SEQ")
+            self.cwnd = min(self.cwnd, 64)
+            # if seq is None:
+            #     print("NO SEQ")
+            self.log("ACK seq=%d cwnd=%.2f" % (seq, self.cwnd))
         
         # If the ACK is for an unacked packet in the window // record the RTT (only if this packet was never retransmitted) and mark it as acked.
         #  -> update the congestion window accordingly.
     def validate_packet(self, ack):
-        print("ONE " + ack.get("checksum"))
-        print("TWO " + checksum(str(ack["seq"])))
         return ack.get("checksum") == checksum(str(ack["seq"]))
 
     def retransmit_timed_out(self):
-        for s, v in self.window.items():
-            if v["acked"] == False:
-                if (time.time() - v["sent_at"]) > self.timeout:
-                    v["sent_at"] = time.time()
-                    v["retransmits"] += 1
-                    self.send_packet(v["msg"])
-                    self.ssthresh = max(self.cwnd / 2, 2)
-                    self.cwnd = 1
-    
+        retransmitted = False
+        for s, v in list(self.window.items()):
+            if not v["acked"] and (time.time() - v["sent_at"]) > self.timeout:
+                v["sent_at"] = time.time()
+                v["retransmits"] += 1
+                self.send_packet(v["msg"])
+                if not retransmitted:
+                    self.ssthresh = max(self.cwnd * 0.75, 4)
+                    self.cwnd = self.ssthresh
+                    retransmitted = True
 
               
 
@@ -85,7 +86,7 @@ class Sender:
             in_flight = len([s for s, v in self.window.items() if not v["acked"]])
             can_send = int(self.cwnd) - in_flight
 
-            if can_send > 0 and not self.eof:
+            while can_send > 0 and not self.eof:
                 data = sys.stdin.read(DATA_SIZE)
                 if len(data) == 0:
                     self.eof = True
@@ -96,6 +97,7 @@ class Sender:
                     msg = {"type": "msg", "seq": seq, "data": data, "checksum": checksum(data)}
                     self.window[seq] = {"msg": msg, "sent_at": time.time(), "acked": False, "retransmits": 0}
                     self.send_packet(msg)
+                    can_send -= 1
 
             socks = select.select([self.socket], [], [], 0.01)[0]
             for conn in socks:
@@ -107,9 +109,11 @@ class Sender:
                     if addr != (self.remote_host, self.remote_port):
                         continue
                     ack = json.loads(raw.decode("utf-8"))
-                    print(ack)
+                    self.log("Received ACK %s" % ack)
                 except Exception as e:
                     self.log("Error parsing ACK: %s" % e)
+                    continue
+                if ack.get("type") != "ack":
                     continue
                 if not self.validate_packet(ack):
                      continue
