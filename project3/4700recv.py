@@ -27,7 +27,7 @@ class Receiver:
         self.log("Sent ACK seq=%d" % seq)
 
     def validate_packet(self, msg):
-        return checksum(msg["data"]) == msg["checksum"]
+        return checksum(msg["data"]) == msg.get("checksum", "")
 
     def run(self):
         while True:
@@ -62,10 +62,9 @@ class Receiver:
 
                 self.log("Received packet seq=%d" % seq)
                 
-                if self.validate_packet(msg):
-                    self.send_ack(seq)
-                else:
-                    continue
+                if not self.validate_packet(msg):
+                    continue 
+                self.send_ack(seq)
 
                 if seq < self.next_seq or seq in self.buffer:
                     self.log("Duplicate seq=%d, ignoring" % seq)
