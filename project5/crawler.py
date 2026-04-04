@@ -13,17 +13,76 @@ class Crawler:
         self.username = args.username
         self.password = args.password
 
+        self.socket = None
+        self.cookies = {}
+        self.frontier = []
+        self.visited = set()
+        self.flags = []
+    
+    def connect(self):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.connect((self.server, self.port))
+
+    def scrape(self, html):
+        html = 
+
+    def get_request(self, path, host):
+        request = (
+            f"GET {path} HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            f"Connection: keep-alive\r\n"
+            f"\r\n"
+        )
+        self.socket.send(request.encode('ascii'))
+        return request
+
+    def post_request(self, path, host, token, username, password):
+        body = f"username={username}&password={password}&csrfmiddlewaretoken={token}&next=%2Ffakebook%2F"
+        request = (
+            f"POST {path} HTTP/1.1\r\n"
+            f"Host: {host}\r\n"
+            f"Content-Type: application/x-www-form-urlencoded\r\n"
+            f"Content-Length: {len(body)}\r\n"
+            f"Cookie: csrftoken={token}\r\n"
+            f"Connection: keep-alive\r\n\r\n"
+            f"{body}"
+        )
+        self.socket.send(request.encode('ascii'))
+        return request
+        
+    def receive_response(self):
+        response = b""
+        done = False
+        while True:
+            data = self.socket.recv(1000)
+
+            response += data
+            if "\r\n\r\n" in response.decode():
+                line = response.decode().split("\r\n")
+                body = response.decode().split("\r\n\r\n")[1]
+            
+                print(f"DATA {data}")
+                for l in line:
+                    if "Content-Length" in l:
+                        length = int(l.split(":")[1])
+                        if length == len(body):
+                            done = True
+                    if "Transfer-Encoding" in l:
+                        if "0\r\n\r\n" in body:
+                            done = True
+                if done:
+                    break
+    
     def run(self):
         request = "GET / HTTP/1.0\r\n\r\n"
 
         print("Request to %s:%d" % (self.server, self.port))
         print(request)
-        mysocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        mysocket.connect((self.server, self.port))
-        mysocket.send(request.encode('ascii'))
 
-        data = mysocket.recv(1000)
-        # if length of data is zero, the server has closed the connection
+        self.connect()
+        
+        data = self.receive_response()
+
         if len(data) == 0:
             print("Response:\nSocket closed by %s" % self.server)
         else:
