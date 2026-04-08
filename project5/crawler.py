@@ -2,6 +2,42 @@
 
 import argparse
 import socket
+import html
+from html.parser import HTMLParser
+import ssl
+
+class FakebookParser(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.links = []
+        self.flags = []
+        self.csrf = None
+        self.in_flag = False
+
+    def handle_starttag(self, tag, attrs):
+
+        # find all links and append it to self.links
+        if tag == "a":
+            for attr, value in attrs:
+                if attr == "href":
+                    self.links.append(value)
+
+        # find instance flags and set to true
+        if tag == "h3":
+            for attr, value in attrs:
+                if attr == "class" and value == "secret_flag":
+                    self.in_flag = True
+        # find the csrfmiddlewaretoken and assign it to self.csrf
+        if tag == "input":
+            attrs_dict = dict(attrs)
+            if attrs_dict.get("name") == "csrfmiddlewaretoken":
+                self.csrf = attrs_dict.get("value")
+
+    # if flag exists append it to self.flags
+    def handle_data(self, data):
+        if self.in_flag:
+            self.flags.append(data.strip())
+            self.in_flag = False
 
 DEFAULT_SERVER = "fakebook.khoury.northeastern.edu"
 DEFAULT_PORT = 443
@@ -20,16 +56,33 @@ class Crawler:
         self.flags = []
     
     def connect(self):
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket.connect((self.server, self.port))
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.connect((self.server, self.port))
+
+        # tls
+        context = ssl.create_default_context()
+        self.socket = context.wrap_socket(sock, server_hostname=DEFAULT_SERVER)
 
     def scrape(self, html):
-        html = 
+        parser = FakebookParser()
+        parser.feed(html)
+
+        # If link hasn't been visited add it to frontier
+        for link in parser.links:
+            if self.server in link or link.startswith("/"):
+                if link not in self.visited:
+                    self.frontier.append(link)
+        # if flag doesn't already exist, add flag to self.flags
+        # double check this
+        for flag in parser.flags:
+            if flag not in self.flags:
+                self.flags.append(flag)
 
     def get_request(self, path, host):
         request = (
             f"GET {path} HTTP/1.1\r\n"
             f"Host: {host}\r\n"
+            f"Cookie: csrftoken={self.cookies.get('csrftoken', '')}; sessionid={self.cookies.get('sessionid', '')}\r\n"
             f"Connection: keep-alive\r\n"
             f"\r\n"
         )
@@ -49,7 +102,7 @@ class Crawler:
         )
         self.socket.send(request.encode('ascii'))
         return request
-        
+
     def receive_response(self):
         response = b""
         done = False
@@ -61,7 +114,6 @@ class Crawler:
                 line = response.decode().split("\r\n")
                 body = response.decode().split("\r\n\r\n")[1]
             
-                print(f"DATA {data}")
                 for l in line:
                     if "Content-Length" in l:
                         length = int(l.split(":")[1])
@@ -72,21 +124,88 @@ class Crawler:
                             done = True
                 if done:
                     break
-    
-    def run(self):
-        request = "GET / HTTP/1.0\r\n\r\n"
+        return response
 
-        print("Request to %s:%d" % (self.server, self.port))
-        print(request)
+    def parse_response(self, response):
+        response_text = response.decode('ascii')
+        response_header = response_text.split('\r\n\r\n')[0]
+        response_body = response_text.split('\r\n\r\n')[1]
 
-        self.connect()
+        status_code = int(response_text.split()[1])
+
+            
+        return status_code, response_header, response_body
+    def login(self):
+
+
+        self.get_request("/accounts/login/?next=/fakebook/", self.server)
+        response = self.receive_response()
+        status_code, response_header, response_body, = self.parse_response(response)
         
-        data = self.receive_response()
+        
+        parser = FakebookParser()
+        parser.feed(response_body)
+        token = parser.csrf
+        for l in response_header.split('\r\n'):
+            if "Set-Cookie" in l:
+                cookie = l.split("csrftoken=")[1].split(";")[0]
+                self.cookies['csrftoken'] = cookie
+        
+        self.post_request('/accounts/login/?next=/fakebook/', self.server, token, self.username, self.password)
+        response = self.receive_response()
+        status_code, response_header, response_body, = self.parse_response(response) 
 
-        if len(data) == 0:
-            print("Response:\nSocket closed by %s" % self.server)
-        else:
-            print("Response:\n%s" % data.decode('ascii'))
+        for l in response_header.split('\r\n'):
+            if "Set-Cookie" in l and "sessionid" in l:
+                self.cookies['sessionid'] = l.split("sessionid=")[1].split(";")[0]
+
+
+    def find_flag(self):
+        self.frontier.append("/fakebook/")
+
+        while self.frontier and len(self.flags) < 5:
+            path = self.frontier.pop()
+            self.visited.add(path)
+            self.get_request(path, self.server)
+            response = self.receive_response()
+            status_code, response_header, response_body = self.parse_response(response)
+
+            # Handle status codes
+            if status_code == 200:
+                self.scrape(response_body)
+            while status_code == 302:
+                for l in response_header.split('\r\n'):
+                    if "Location" in l:
+                        redirect = l.split(": ")[1]
+                        self.get_request(redirect, self.server)
+                        response = self.receive_response()
+                        status_code, response_header, response_body = self.parse_response(response)
+
+
+            if status_code == 403 or status_code == 404:
+                pass
+            while status_code == 503:
+                self.get_request(path, self.server)
+                response = self.receive_response()
+                status_code, response_header, response_body = self.parse_response(response)
+
+    def run(self):
+        self.connect()
+        self.login()
+        self.find_flag()
+        
+        for flag in self.flags:
+            print(flag)
+       
+        # response = self.receive_response()
+        # status_code, response_header, response_body = self.parse_response(response)
+
+     
+        
+
+
+
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='crawl Fakebook')
