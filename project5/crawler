@@ -5,6 +5,7 @@ import socket
 import html
 from html.parser import HTMLParser
 import ssl
+import sys
 
 class FakebookParser(HTMLParser):
     def __init__(self):
@@ -36,7 +37,9 @@ class FakebookParser(HTMLParser):
     # if flag exists append it to self.flags
     def handle_data(self, data):
         if self.in_flag:
-            self.flags.append(data.strip())
+            stripped = data.strip()
+            if stripped.startswith("FLAG: "):
+                self.flags.append(stripped[len("FLAG: "):])
             self.in_flag = False
 
 DEFAULT_SERVER = "fakebook.khoury.northeastern.edu"
@@ -61,7 +64,7 @@ class Crawler:
 
         # tls
         context = ssl.create_default_context()
-        self.socket = context.wrap_socket(sock, server_hostname=DEFAULT_SERVER)
+        self.socket = context.wrap_socket(sock, server_hostname=self.server)
 
     def scrape(self, html):
         parser = FakebookParser()
@@ -70,6 +73,11 @@ class Crawler:
         # If link hasn't been visited add it to frontier
         for link in parser.links:
             if self.server in link or link.startswith("/"):
+                if link.startswith("http"):
+                    link = "/" + "/".join(link.split("/")[3:])
+                #skip login/logout
+                if not link.startswith("/fakebook/"):
+                    continue
                 if link not in self.visited:
                     self.frontier.append(link)
         # if flag doesn't already exist, add flag to self.flags
@@ -78,15 +86,21 @@ class Crawler:
             if flag not in self.flags:
                 self.flags.append(flag)
 
+                print(flag)         
+
     def get_request(self, path, host):
-        request = (
-            f"GET {path} HTTP/1.1\r\n"
-            f"Host: {host}\r\n"
-            f"Cookie: csrftoken={self.cookies.get('csrftoken', '')}; sessionid={self.cookies.get('sessionid', '')}\r\n"
-            f"Connection: keep-alive\r\n"
-            f"\r\n"
-        )
-        self.socket.send(request.encode('ascii'))
+        try:
+            request = (
+                f"GET {path} HTTP/1.1\r\n"
+                f"Host: {host}\r\n"
+                f"Cookie: csrftoken={self.cookies.get('csrftoken', '')}; sessionid={self.cookies.get('sessionid', '')}\r\n"
+                f"Connection: keep-alive\r\n"
+                f"\r\n"
+            )
+            self.socket.send(request.encode('ascii'))
+        except:
+            self.connect()
+            self.socket.send(request.encode('ascii'))
         return request
 
     def post_request(self, path, host, token, username, password):
@@ -104,30 +118,64 @@ class Crawler:
         return request
 
     def receive_response(self):
-        response = b""
-        done = False
-        while True:
-            data = self.socket.recv(1000)
+        raw = b""
+        while b"\r\n\r\n" not in raw:
+            data = self.socket.recv(4096)
+            if not data:
+                break
+            raw += data
 
-            response += data
-            if "\r\n\r\n" in response.decode():
-                line = response.decode().split("\r\n")
-                body = response.decode().split("\r\n\r\n")[1]
-            
-                for l in line:
-                    if "Content-Length" in l:
-                        length = int(l.split(":")[1])
-                        if length == len(body):
-                            done = True
-                    if "Transfer-Encoding" in l:
-                        if "0\r\n\r\n" in body:
-                            done = True
-                if done:
+        header_bytes, _, body_bytes = raw.partition(b"\r\n\r\n")
+        header_text = header_bytes.decode("latin-1")
+
+        content_length = None
+        chunked = False
+        for line in header_text.split("\r\n"):
+            lower = line.lower()
+            if lower.startswith("content-length:"):
+                content_length = int(line.split(":", 1)[1].strip())
+            if lower.startswith("transfer-encoding:") and "chunked" in lower:
+                chunked = True
+
+        if content_length is not None:
+            while len(body_bytes) < content_length:
+                data = self.socket.recv(4096)
+                if not data:
                     break
-        return response
+                body_bytes += data
+            return header_bytes + b"\r\n\r\n" + body_bytes
+
+        if chunked:
+            plain_body = b""
+            buf = body_bytes
+            while True:
+                while b"\r\n" not in buf:
+                    more = self.socket.recv(4096)
+                    if not more:
+                        break
+                    buf += more
+                size_line, _, buf = buf.partition(b"\r\n")
+                chunk_size = int(size_line.split(b";")[0].strip(), 16)
+                if chunk_size == 0:
+                    break
+                while len(buf) < chunk_size + 2:
+                    more = self.socket.recv(4096)
+                    if not more:
+                        break
+                    buf += more
+                plain_body += buf[:chunk_size]
+                buf = buf[chunk_size + 2:]
+            return header_bytes + b"\r\n\r\n" + plain_body
+
+        while True:
+            data = self.socket.recv(4096)
+            if not data:
+                break
+            body_bytes += data
+        return header_bytes + b"\r\n\r\n" + body_bytes
 
     def parse_response(self, response):
-        response_text = response.decode('ascii')
+        response_text = response.decode('latin-1')
         response_header = response_text.split('\r\n\r\n')[0]
         response_body = response_text.split('\r\n\r\n')[1]
 
@@ -136,29 +184,31 @@ class Crawler:
             
         return status_code, response_header, response_body
     def login(self):
-
-
         self.get_request("/accounts/login/?next=/fakebook/", self.server)
         response = self.receive_response()
         status_code, response_header, response_body, = self.parse_response(response)
-        
-        
+        # print(f"full header:\n{response_header}", file=sys.stderr)
+        for l in response_header.split('\r\n'):
+            if "set-cookie" in l and "csrftoken=" in l:
+                cookie = l.split("csrftoken=")[1].split(";")[0]
+                self.cookies['csrftoken'] = cookie
+                # print(f"saved csrftoken: {cookie}", file=sys.stderr)
+
         parser = FakebookParser()
         parser.feed(response_body)
         token = parser.csrf
-        for l in response_header.split('\r\n'):
-            if "Set-Cookie" in l:
-                cookie = l.split("csrftoken=")[1].split(";")[0]
-                self.cookies['csrftoken'] = cookie
-        
+        # print(f"token: {token}", file=sys.stderr)
+        # print(f"cookies before post: {self.cookies}", file=sys.stderr)
+
         self.post_request('/accounts/login/?next=/fakebook/', self.server, token, self.username, self.password)
         response = self.receive_response()
         status_code, response_header, response_body, = self.parse_response(response) 
 
         for l in response_header.split('\r\n'):
-            if "Set-Cookie" in l and "sessionid" in l:
+            if "set-cookie" in l and "sessionid" in l:
                 self.cookies['sessionid'] = l.split("sessionid=")[1].split(";")[0]
 
+        # print(f"cookies after post: {self.cookies}", file=sys.stderr)
 
     def find_flag(self):
         self.frontier.append("/fakebook/")
@@ -171,16 +221,18 @@ class Crawler:
             status_code, response_header, response_body = self.parse_response(response)
 
             # Handle status codes
-            if status_code == 200:
-                self.scrape(response_body)
             while status_code == 302:
                 for l in response_header.split('\r\n'):
                     if "Location" in l:
-                        redirect = l.split(": ")[1]
+                        redirect = l.split(": ")[1].strip()
+                        # extract just the path from the URL if absolute
+                        if redirect.startswith("http"):
+                            redirect = "/" + "/".join(redirect.split("/")[3:])
                         self.get_request(redirect, self.server)
                         response = self.receive_response()
                         status_code, response_header, response_body = self.parse_response(response)
-
+            if status_code == 200:
+                self.scrape(response_body)
 
             if status_code == 403 or status_code == 404:
                 pass
@@ -194,8 +246,8 @@ class Crawler:
         self.login()
         self.find_flag()
         
-        for flag in self.flags:
-            print(flag)
+        # for flag in self.flags:
+        #     print(f"FLAG FOUND : " + flag)
        
         # response = self.receive_response()
         # status_code, response_header, response_body = self.parse_response(response)
