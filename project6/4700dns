@@ -11,9 +11,7 @@ def log(msg):
     sys.stderr.write(msg + "\n")
     sys.stderr.flush()
 
-# ============================================================
-#  Cache
-# ============================================================
+
 class Cache:
     def __init__(self):
         self._lock  = threading.Lock()
@@ -31,6 +29,7 @@ class Cache:
         with self._lock:
             bucket = self._store.setdefault(k, [])
             strs   = {str(e[0]) for e in bucket}
+            # avoid storing duplicates
             if str(rr) not in strs:
                 bucket.append((rr, expire))
 
@@ -46,18 +45,21 @@ class Cache:
             bucket = self._store.get(k)
             if not bucket:
                 return None
+            # drop expired entries while we're here
             live = [(rr, exp) for rr, exp in bucket if exp > now]
             self._store[k] = live
             if not live:
                 return None
             result = []
             for rr, exp in live:
+                # copy so callers get the right remaining TTL
                 c     = copy.copy(rr)
                 c.ttl = max(1, int(exp - now))
                 result.append(c)
             return result
 
     def evict(self):
+        # periodic full sweep to free memory
         now = time.time()
         with self._lock:
             for k in list(self._store):
@@ -67,10 +69,9 @@ class Cache:
                 else:
                     del self._store[k]
 
-# ============================================================
-#  Bailiwick
-# ============================================================
+
 def in_bailiwick(record_name, server_zone):
+    # a record is in bailiwick if it lives at or below the zone we got it from
     rn = str(record_name).rstrip('.').lower()
     sz = str(server_zone).rstrip('.').lower()
     if sz in ('', '.'):
@@ -81,15 +82,14 @@ def filter_bailiwick(rrs, zone):
     return [r for r in rrs if in_bailiwick(r.rname, zone)]
 
 def is_valid_answer(rr, qname):
+    # CNAMEs are always valid in an answer section; everything else must match qname
     rname = str(rr.rname).rstrip('.').lower()
     qn    = qname.rstrip('.').lower()
     if rr.rtype == QTYPE.CNAME:
         return True
     return rname == qn
 
-# ============================================================
-#  Zone loading
-# ============================================================
+
 def load_zone(path):
     with open(path) as f:
         text = f.read()
@@ -108,6 +108,7 @@ def load_zone(path):
     return origin, rrs
 
 def build_index(rrs):
+    # maps (name_lower, qtype_int) -> list of matching RRs for fast lookups
     idx = {}
     for rr in rrs:
         k = (str(rr.rname).rstrip('.').lower(), int(rr.rtype))
@@ -118,13 +119,13 @@ def zlookup(idx, name, qtype):
     return idx.get((str(name).rstrip('.').lower(), int(qtype)), [])
 
 def zhas(idx, name):
+    # T if the name exists in the zone at all, regardless of record type
     n = str(name).rstrip('.').lower()
     return any(k[0] == n for k in idx)
 
-# ============================================================
-#  UDP query — shared socket per chain, retries on timeout/TC
-# ============================================================
+
 def send_and_recv(sock, ip, qname, qtype, timeout=TIMEOUT):
+    # send one query and wait for a matchng response; returns (pkt, tc_flag)
     try:
         qtype_str   = QTYPE[qtype] if isinstance(qtype, int) else qtype
         label       = qname if qname else "."
@@ -151,20 +152,21 @@ def send_and_recv(sock, ip, qname, qtype, timeout=TIMEOUT):
         return None, False
 
 def query_server(sock, ip, qname, qtype, retries=RETRIES, timeout=TIMEOUT):
+    # retry on timeout or TC; track whether every response was truncated
+    # (all_tc=True means we're on the wrong parity of the erratic counter)
     all_tc = True
     for attempt in range(retries):
         resp, tc = send_and_recv(sock, ip, qname, qtype, timeout)
         if resp is None:
-            all_tc = False  # timeout, not TC
+            all_tc = False  # timeout, not a truncation
             continue
         if tc:
+            log("  TC attempt %d/%d %s @ %s" % (attempt+1, retries, qname, ip))
             continue
         return resp, False
     return None, all_tc
 
-# ============================================================
-#  Recursive resolver
-# ============================================================
+
 class Resolver:
     def __init__(self, root_ip, cache):
         self.root_ip = root_ip
@@ -179,6 +181,7 @@ class Resolver:
             log("  cache hit: %s %s" % (qname, QTYPE[qtype]))
             return self._answer(qname, qtype, RCODE.NOERROR, cached)
 
+        # one socket per resolution chain so the eratic counter advances predictably
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
             return self._resolve_with_sock(sock, qname, qtype, depth)
@@ -194,10 +197,10 @@ class Resolver:
             log("[resolve] %s %s @ %s (zone=%s)" % (qname, QTYPE[qtype], ns_ip, zone))
             resp, all_tc = query_server(sock, ns_ip, qname, qtype)
 
-            # If all retries were TC, try once more with a fresh socket
-            # to get opposite parity on the erratic counter
+            # if every attempt was trunc. we're stuck on the bad parity slot;
+            # a fresh socket resets the counter so te next attempt goes through
             if resp is None and all_tc:
-                log("  all-TC from %s — retrying with fresh socket" % ns_ip)
+                log("  all-TC from %s -- retrying with fresh socket" % ns_ip)
                 fresh = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
                 try:
                     resp, _ = query_server(fresh, ns_ip, qname, qtype)
@@ -205,11 +208,12 @@ class Resolver:
                     fresh.close()
 
             if resp is None:
-                log("  failed from %s — using last referral" % ns_ip)
+                log("  failed from %s -- using last referral" % ns_ip)
                 return last_referral
 
             rcode = resp.header.rcode
 
+            # cache everything in the response that's in bailiwick
             safe = filter_bailiwick(
                 list(resp.rr) + list(resp.auth) + list(resp.ar), zone)
             self.cache.put_many(safe)
@@ -217,14 +221,16 @@ class Resolver:
             if rcode == RCODE.NXDOMAIN:
                 return resp
 
+            # trunc server returns SERVFAIL on its own NS queries; fall back to referral
             if rcode == RCODE.SERVFAIL:
-                log("  SERVFAIL from %s — using last referral" % ns_ip)
+                log("  SERVFAIL from %s -- using last referral" % ns_ip)
                 return last_referral
 
             if rcode != RCODE.NOERROR:
                 return resp
 
             if resp.rr:
+                # filter out answer records that don't belong to qname
                 valid_answers = [r for r in resp.rr if is_valid_answer(r, qname)]
                 if not valid_answers:
                     return self._answer(qname, qtype, RCODE.NOERROR, [])
@@ -236,6 +242,7 @@ class Resolver:
                     out = DNSRecord(DNSHeader(rcode=RCODE.NOERROR))
                     out.add_question(DNSQuestion(qname, qtype))
                     for r in valid_answers: out.add_answer(r)
+                    # only carry auth/ar through for NS queries; reference strips them for A
                     if qtype == QTYPE.NS:
                         for r in resp.auth:
                             out.add_auth(r)
@@ -245,6 +252,7 @@ class Resolver:
                     return out
 
                 if cnames and qtype != QTYPE.CNAME:
+                    # follow the chain to get the final answer
                     target   = str(cnames[-1].rdata).rstrip('.')
                     cached_t = self.cache.get(target, qtype)
                     if cached_t:
@@ -264,11 +272,13 @@ class Resolver:
 
                 return self._answer(qname, qtype, RCODE.NOERROR, [])
 
+            # no answer section means this is a referral; find the best NS to follow
             ns_rrs = [r for r in list(resp.auth) + list(resp.rr)
-                    if r.rtype == QTYPE.NS]
+                      if r.rtype == QTYPE.NS]
             if not ns_rrs:
                 return self._answer(qname, qtype, RCODE.NOERROR, [])
 
+            # pick the most specific NS whose zone contains qname
             best, best_len = ns_rrs[0], -1
             for nr in ns_rrs:
                 z = str(nr.rname).rstrip('.')
@@ -279,6 +289,7 @@ class Resolver:
             ns_name = str(best.rdata).rstrip('.')
             last_referral = resp
 
+            # try glue first, then cache, then recurse for the NS address
             glue = [r for r in resp.ar
                     if r.rtype == QTYPE.A and
                     str(r.rname).rstrip('.').lower() == ns_name.lower()]
@@ -308,9 +319,7 @@ class Resolver:
             r.add_answer(rr)
         return r
 
-# ============================================================
-#  Server
-# ============================================================
+
 class Server:
     def __init__(self, root_ip, zone_file, port=0):
         self.root_ip          = root_ip
@@ -361,6 +370,7 @@ class Server:
 
         q     = req.questions[0]
         raw   = str(q.qname)
+        # preserve "." for root queries; strip trailing dot otherwise
         qname = raw if raw == '.' else raw.rstrip('.')
         qtype = int(q.qtype)
         log("[%s:%d] %s %s" % (addr[0], addr[1], qname,
@@ -383,6 +393,7 @@ class Server:
         return qn == o or qn.endswith('.' + o)
 
     def _add_ns_authority(self, resp):
+        # add our zone's NS records to the authority section
         for ns in zlookup(self.zone_idx, self.origin, QTYPE.NS):
             resp.add_auth(ns)
 
@@ -405,6 +416,7 @@ class Server:
             self._add_ns_authority(resp)
             return resp
 
+        # walk any CNAME chain before looking up the requested type
         chain, cur, seen = [], qname, set()
         while True:
             lc = cur.lower()
@@ -432,11 +444,13 @@ class Server:
             for rr in direct:
                 resp.add_answer(rr)
             if qtype == QTYPE.NS:
+                # glue A records go in additional for NS responses
                 for nr in direct:
                     ns_name = str(nr.rdata).rstrip('.')
                     for g in zlookup(self.zone_idx, ns_name, QTYPE.A):
                         resp.add_ar(g)
             elif qtype == QTYPE.MX:
+                # same idea for MX exchanges we're authoritative for
                 for mr in direct:
                     try:
                         mx_name = str(mr.rdata.label).rstrip('.')
@@ -449,10 +463,12 @@ class Server:
                 self._add_ns_authority(resp)
             return resp
 
+        # name exsts but no records of this type
         if zhas(self.zone_idx, qname):
             self._add_ns_authority(resp)
             return resp
 
+        # name doesn't exist a all
         resp.header.rcode = RCODE.NXDOMAIN
         for soa in zlookup(self.zone_idx, self.origin, QTYPE.SOA):
             resp.add_auth(soa)
@@ -472,7 +488,8 @@ class Server:
         for rr in result.rr:   resp.add_answer(rr)
         for rr in result.auth: resp.add_auth(rr)
 
-        # Filter additional: only records mentioned in answer/auth
+        # only forward additional records whose owner is actually mentioned
+        # in the answer or authority; this blocks bailiwick injection
         mentioned = set()
         for rr in list(result.rr) + list(result.auth):
             mentioned.add(str(rr.rname).rstrip('.').lower())
@@ -488,7 +505,7 @@ class Server:
             if str(rr.rname).rstrip('.').lower() in mentioned:
                 resp.add_ar(rr)
 
-        # Only add cached glue for NS queries with no additional yet
+        # for NS quries, if we have no glue in additional yet, check the cache
         if qtype == QTYPE.NS and not list(resp.ar):
             all_ns = [r for r in list(result.rr) + list(result.auth)
                       if r.rtype == QTYPE.NS]
